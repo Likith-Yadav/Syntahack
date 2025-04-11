@@ -116,9 +116,24 @@ export default function RoleSelectionModal({ onSelectRole, onClose }: RoleSelect
         window.localStorage.setItem("approvedUsers", JSON.stringify(approvedUsers));
         console.log("Successfully saved to approvedUsers:", approvedUsers);
         
-        // Also store role directly for faster access later
+        // Store role in multiple locations to ensure persistence
+        // 1. Direct role storage (most commonly checked)
         window.localStorage.setItem(`role_${normalizedAddress}`, selectedRole);
-        console.log(`Role for ${normalizedAddress} stored directly as ${selectedRole}`);
+        
+        // 2. Transaction mapping
+        window.localStorage.setItem(`tx_${txHash}`, JSON.stringify({
+          address: normalizedAddress,
+          role: selectedRole,
+          timestamp: Date.now()
+        }));
+        
+        // 3. Address-specific role
+        window.localStorage.setItem(`user_role_${normalizedAddress}`, selectedRole);
+        
+        // 4. Record that this address has completed onboarding
+        window.localStorage.setItem(`onboarded_${normalizedAddress}`, "true");
+        
+        console.log(`Role data for ${normalizedAddress} stored in multiple locations`);
       } catch (storageError) {
         console.error("Error saving to localStorage:", storageError);
       }

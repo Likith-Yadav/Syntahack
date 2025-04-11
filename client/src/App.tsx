@@ -91,33 +91,67 @@ function AppContent() {
 
 	// Helper function to check if user has a role in any storage format
 	const checkIfUserHasRole = (address: string): boolean => {
-		// Check direct role storage
-		const userRoleDirectly = window.localStorage.getItem(`role_${address}`);
-		if (userRoleDirectly) {
-			console.log("Found role in direct storage:", userRoleDirectly);
-			return true;
-		}
+		// Normalize the address for consistent matching
+		const normalizedAddress = address.toLowerCase();
+		console.log(`Checking if user ${normalizedAddress} has a role`);
 		
-		// Check approved users
 		try {
+			// Method 1: Check direct role storage (fastest)
+			const userRoleDirectly = window.localStorage.getItem(`role_${normalizedAddress}`);
+			if (userRoleDirectly) {
+				console.log(`Found role in direct storage: ${userRoleDirectly}`);
+				return true;
+			}
+			
+			// Method 2: Check approvedUsers in localStorage
 			const approvedData = window.localStorage.getItem("approvedUsers");
 			if (approvedData) {
 				const approvedUsers = JSON.parse(approvedData);
 				const foundUser = approvedUsers.find(
-					(user: any) => user.address.toLowerCase() === address
+					(user: any) => user.address && user.address.toLowerCase() === normalizedAddress
 				);
+				
 				if (foundUser) {
-					console.log("Found user in approved users list:", foundUser.role);
-					// Store directly for faster access next time
-					window.localStorage.setItem(`role_${address}`, foundUser.role);
+					console.log(`Found user in approved users list: ${foundUser.role}`);
+					// Save to direct storage for faster access next time
+					window.localStorage.setItem(`role_${normalizedAddress}`, foundUser.role);
 					return true;
 				}
 			}
+
+			// Method 3: Check any recent transactions with this address
+			const allKeys = Object.keys(window.localStorage);
+			const transactionKeys = allKeys.filter(key => 
+				key.startsWith("tx_") || 
+				key.includes("Transaction") || 
+				key.includes("ipfsMappings_")
+			);
+			
+			for (const key of transactionKeys) {
+				const data = window.localStorage.getItem(key);
+				if (data && data.toLowerCase().includes(normalizedAddress)) {
+					console.log(`Found address in transaction data: ${key}`);
+					// Can't determine role, but user has transacted before, so set a default
+					// This fallback ensures we don't prompt for role selection again
+					window.localStorage.setItem(`role_${normalizedAddress}`, "student");
+					return true;
+				}
+			}
+			
+			// Method 4: Last resort - check if we've seen this address in any role-mapping
+			for (const key of allKeys) {
+				if (key.includes(normalizedAddress) && window.localStorage.getItem(key)) {
+					console.log(`Found address reference in localStorage: ${key}`);
+					return true;
+				}
+			}
+			
+			console.log(`No role found for user ${normalizedAddress}`);
+			return false;
 		} catch (error) {
-			console.error("Error checking approved users:", error);
+			console.error("Error checking user role:", error);
+			return false;
 		}
-		
-		return false;
 	};
 	
 	// Helper function to get user's role
@@ -188,10 +222,13 @@ function AppContent() {
 
 		// Store the selected role in state
 		setSelectedRole(role);
+		
+		// Normalize address for consistency
+		const normalizedAddress = account.address.toLowerCase();
 
 		// Create a new approved user directly
 		const newUser = {
-			address: account.address.toLowerCase(),
+			address: normalizedAddress,
 			role: role,
 			timestamp: Date.now(),
 			paymentConfirmed: true,
@@ -212,7 +249,7 @@ function AppContent() {
 
 		// Remove any existing users with this address to avoid duplicates
 		approvedUsers = approvedUsers.filter(
-			(user: any) => user.address.toLowerCase() !== account.address.toLowerCase()
+			(user: any) => user.address.toLowerCase() !== normalizedAddress
 		);
 		console.log("Approved users after filtering existing records:", approvedUsers);
 
@@ -220,16 +257,31 @@ function AppContent() {
 		approvedUsers.push(newUser);
 		console.log("Approved users after adding new user:", approvedUsers);
 
-		// Save back to localStorage
+		// Save user data in multiple locations for persistent role tracking
 		try {
+			// 1. Save to approvedUsers array
 			window.localStorage.setItem("approvedUsers", JSON.stringify(approvedUsers));
-			console.log("Successfully saved approvedUsers to localStorage:", approvedUsers);
 			
-			// Also store role directly for immediate access
-			window.localStorage.setItem(`role_${account.address.toLowerCase()}`, role);
-			console.log("Successfully stored direct role in localStorage");
+			// 2. Direct role storage (primary lookup method)
+			window.localStorage.setItem(`role_${normalizedAddress}`, role);
+			
+			// 3. User-specific role
+			window.localStorage.setItem(`user_role_${normalizedAddress}`, role);
+			
+			// 4. Mark as onboarded
+			window.localStorage.setItem(`onboarded_${normalizedAddress}`, "true");
+			
+			// 5. User profile data
+			window.localStorage.setItem(`profile_${normalizedAddress}`, JSON.stringify({
+				address: normalizedAddress,
+				role: role,
+				timestamp: Date.now(),
+				status: "active"
+			}));
+			
+			console.log(`Role data for ${normalizedAddress} stored in multiple locations`);
 		} catch (error) {
-			console.error("Error saving approvedUsers to localStorage:", error);
+			console.error("Error saving role data to localStorage:", error);
 		}
 
 		// Hide modal and navigate directly to dashboard
@@ -316,22 +368,57 @@ function AppContent() {
 											</button>
 											<button
 												onClick={() => {
-													// Remove user-specific data but preserve admin data
-													const isAdminValue = isAdmin;
-													const adminAddress = import.meta.env.VITE_ADMIN_ADDRESS?.toLowerCase();
+													// Get user address before disconnecting
+													const userAddress = account?.address?.toLowerCase();
 													
-													// Clear all localStorage data
-													Object.keys(localStorage).forEach(key => {
-														// Skip admin-related data
-														if (isAdminValue && (
-															key === `role_${adminAddress}` || 
-															key === "approvedUsers"
-														)) {
-															return;
+													// Only clear the session data, NOT the role data
+													if (userAddress) {
+														// Save the current role information
+														const roleKeys = Object.keys(localStorage).filter(key => 
+															key.startsWith(`role_${userAddress}`) || 
+															key.startsWith(`user_role_${userAddress}`) ||
+															key.startsWith(`onboarded_${userAddress}`) ||
+															key.startsWith(`profile_${userAddress}`)
+														);
+														
+														// Store role data temporarily
+														const savedRoleData: Record<string, string> = {};
+														roleKeys.forEach(key => {
+															const value = localStorage.getItem(key);
+															if (value) savedRoleData[key] = value;
+														});
+														
+														// Get existing approved users
+														let approvedUsers = [];
+														try {
+															const approvedData = localStorage.getItem("approvedUsers");
+															if (approvedData) {
+																approvedUsers = JSON.parse(approvedData);
+															}
+														} catch (e) {
+															console.error("Error parsing approvedUsers:", e);
 														}
-														// Clear user-specific data
-														localStorage.removeItem(key);
-													});
+														
+														// Clear only session-related data
+														const keysToPreserve = [
+															...roleKeys, 
+															"approvedUsers"
+														];
+														
+														Object.keys(localStorage)
+															.filter(key => !keysToPreserve.includes(key))
+															.forEach(key => localStorage.removeItem(key));
+															
+														// Restore approvedUsers
+														if (approvedUsers.length > 0) {
+															localStorage.setItem("approvedUsers", JSON.stringify(approvedUsers));
+														}
+														
+														// Restore role data
+														Object.keys(savedRoleData).forEach(key => {
+															localStorage.setItem(key, savedRoleData[key]);
+														});
+													}
 													
 													// Reset UI state
 													setSelectedRole(null);
@@ -450,22 +537,57 @@ function AppContent() {
 												</button>
 												<button
 													onClick={() => {
-														// Remove user-specific data but preserve admin data
-														const isAdminValue = isAdmin;
-														const adminAddress = import.meta.env.VITE_ADMIN_ADDRESS?.toLowerCase();
+														// Get user address before disconnecting
+														const userAddress = account?.address?.toLowerCase();
 														
-														// Clear all localStorage data
-														Object.keys(localStorage).forEach(key => {
-															// Skip admin-related data
-															if (isAdminValue && (
-																key === `role_${adminAddress}` || 
-																key === "approvedUsers"
-															)) {
-																return;
+														// Only clear the session data, NOT the role data
+														if (userAddress) {
+															// Save the current role information
+															const roleKeys = Object.keys(localStorage).filter(key => 
+																key.startsWith(`role_${userAddress}`) || 
+																key.startsWith(`user_role_${userAddress}`) ||
+																key.startsWith(`onboarded_${userAddress}`) ||
+																key.startsWith(`profile_${userAddress}`)
+															);
+															
+															// Store role data temporarily
+															const savedRoleData: Record<string, string> = {};
+															roleKeys.forEach(key => {
+																const value = localStorage.getItem(key);
+																if (value) savedRoleData[key] = value;
+															});
+															
+															// Get existing approved users
+															let approvedUsers = [];
+															try {
+																const approvedData = localStorage.getItem("approvedUsers");
+																if (approvedData) {
+																	approvedUsers = JSON.parse(approvedData);
+																}
+															} catch (e) {
+																console.error("Error parsing approvedUsers:", e);
 															}
-															// Clear user-specific data
-															localStorage.removeItem(key);
-														});
+															
+															// Clear only session-related data
+															const keysToPreserve = [
+																...roleKeys, 
+																"approvedUsers"
+															];
+															
+															Object.keys(localStorage)
+																.filter(key => !keysToPreserve.includes(key))
+																.forEach(key => localStorage.removeItem(key));
+																
+															// Restore approvedUsers
+															if (approvedUsers.length > 0) {
+																localStorage.setItem("approvedUsers", JSON.stringify(approvedUsers));
+															}
+															
+															// Restore role data
+															Object.keys(savedRoleData).forEach(key => {
+																localStorage.setItem(key, savedRoleData[key]);
+															});
+														}
 														
 														// Reset UI state
 														setSelectedRole(null);
