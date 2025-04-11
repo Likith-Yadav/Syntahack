@@ -49,14 +49,11 @@ export default function AdminDashboard() {
     try {
       // Get pending users
       const storedPending = window.localStorage.getItem("pendingUsers");
-      console.log("Raw pendingUsers from localStorage:", storedPending);
-
       let pendingUsersList: PendingUser[] = [];
 
       if (storedPending) {
         try {
           const parsedPending = JSON.parse(storedPending);
-          console.log("Parsed pendingUsers:", parsedPending);
 
           // Include all pending requests, not just those with paymentConfirmed
           pendingUsersList = parsedPending.map((user: PendingUser) => ({
@@ -66,37 +63,30 @@ export default function AdminDashboard() {
           }));
 
           pendingUsersList.sort((a: PendingUser, b: PendingUser) => b.timestamp - a.timestamp);
-          console.log("Processed pendingUsersList:", pendingUsersList);
         } catch (error) {
           console.error("Error parsing pendingUsers:", error);
         }
-      } else {
-        console.log("No pendingUsers found in localStorage");
       }
 
       // Get approved users
       const storedApproved = window.localStorage.getItem("approvedUsers");
-      console.log("Raw approvedUsers from localStorage:", storedApproved);
-
       let approvedUsersList: PendingUser[] = [];
 
       if (storedApproved) {
         try {
           const parsedApproved = JSON.parse(storedApproved);
-          console.log("Parsed approvedUsers:", parsedApproved);
 
           approvedUsersList = parsedApproved.map((user: PendingUser) => ({
             ...user,
             status: user.status || "approved",
           }));
 
+          // Filter to only include users with payment confirmed
+          approvedUsersList = approvedUsersList.filter(user => user.paymentConfirmed);
           approvedUsersList.sort((a: PendingUser, b: PendingUser) => b.timestamp - a.timestamp);
-          console.log("Processed approvedUsersList:", approvedUsersList);
         } catch (error) {
           console.error("Error parsing approvedUsers:", error);
         }
-      } else {
-        console.log("No approvedUsers found in localStorage");
       }
 
       // Update state with users from localStorage
@@ -107,11 +97,9 @@ export default function AdminDashboard() {
       if (isPinataConfigured() && account?.address) {
         try {
           const ipfsHashes = await getTransactionsForAddress(account.address);
-          console.log("Found IPFS hashes for admin:", ipfsHashes);
 
           for (const hash of ipfsHashes) {
             const ipfsData = await retrieveTransactionData(hash);
-            console.log(`IPFS data for hash ${hash}:`, ipfsData);
 
             if (ipfsData && ipfsData.address && ipfsData.role) {
               if (ipfsData.paymentConfirmed && !ipfsData.status) {
@@ -147,10 +135,13 @@ export default function AdminDashboard() {
                     ipfsHash: hash,
                   };
                 } else {
-                  approvedUsersList.push({
-                    ...ipfsData,
-                    ipfsHash: hash,
-                  });
+                  // Only add to approved list if payment was confirmed
+                  if (ipfsData.paymentConfirmed) {
+                    approvedUsersList.push({
+                      ...ipfsData,
+                      ipfsHash: hash,
+                    });
+                  }
                 }
               }
             }
@@ -161,7 +152,6 @@ export default function AdminDashboard() {
 
           window.localStorage.setItem("pendingUsers", JSON.stringify(pendingUsersList));
           window.localStorage.setItem("approvedUsers", JSON.stringify(approvedUsersList));
-          console.log("Updated localStorage with IPFS-enhanced data");
         } catch (error) {
           console.error("Error retrieving IPFS data:", error);
         }
@@ -190,7 +180,6 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const refreshInterval = setInterval(() => {
-      console.log("Auto-refreshing admin dashboard");
       loadUsers();
     }, 5000);
 
@@ -203,12 +192,6 @@ export default function AdminDashboard() {
 
   const handleApprove = async (user: PendingUser) => {
     try {
-      console.log("Approving user - start:", { user, address: user.address, role: user.role });
-      console.log("Current localStorage state:", {
-        pendingUsers: localStorage.getItem("pendingUsers"),
-        approvedUsers: localStorage.getItem("approvedUsers")
-      });
-
       let currentPendingUsers: PendingUser[] = [];
       try {
         const pendingData = window.localStorage.getItem("pendingUsers");
@@ -220,7 +203,6 @@ export default function AdminDashboard() {
       const updatedPendingUsers = currentPendingUsers.filter(
         (u: PendingUser) => u.address.toLowerCase() !== user.address.toLowerCase()
       );
-      console.log("Updated pending users:", updatedPendingUsers);
 
       window.localStorage.setItem("pendingUsers", JSON.stringify(updatedPendingUsers));
 
@@ -240,14 +222,11 @@ export default function AdminDashboard() {
       };
 
       const updatedApprovedUsers = [...currentApprovedUsers, approvedUser];
-      console.log("Updated approved users:", updatedApprovedUsers);
 
       window.localStorage.setItem("approvedUsers", JSON.stringify(updatedApprovedUsers));
 
       const normalizedAddress = user.address.toLowerCase();
       window.localStorage.setItem(`role_${normalizedAddress}`, user.role);
-      console.log(`Directly stored role for ${normalizedAddress}: ${user.role}`);
-      console.log("All localStorage keys after approval:", Object.keys(window.localStorage));
 
       try {
         const approvalData: TransactionData = {
@@ -261,7 +240,6 @@ export default function AdminDashboard() {
         };
 
         const hash = await storeTransactionData(approvalData);
-        console.log("Approval stored on IPFS with hash:", hash);
 
         approvedUser.ipfsHash = hash;
         window.localStorage.setItem("approvedUsers", JSON.stringify(updatedApprovedUsers));
@@ -273,7 +251,6 @@ export default function AdminDashboard() {
       setApprovedUsers(updatedApprovedUsers);
 
       alert(`User ${user.address} has been approved as ${user.role}`);
-      console.log("Approval completed successfully");
 
       loadUsers();
     } catch (error) {
@@ -605,23 +582,6 @@ export default function AdminDashboard() {
               These users are waiting for your approval to access the platform.
             </p>
             
-            {/* Debug information for admin */}
-            <div className="mb-8 p-4 border border-blue-500/30 rounded-xl bg-blue-500/5">
-              <h3 className="text-blue-400 text-sm font-medium mb-2">Debug Information</h3>
-              <p className="text-xs text-gray-400 mb-2">
-                LocalStorage keys: {Object.keys(window.localStorage).join(", ")}
-              </p>
-              <p className="text-xs text-gray-400">
-                Pending users in state: {pendingUsers.length}
-              </p>
-              <button
-                onClick={() => console.log("Current pending users:", pendingUsers)}
-                className="mt-2 text-xs text-blue-400 hover:text-blue-300 underline"
-              >
-                Log pending users to console
-              </button>
-            </div>
-            
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {pendingUsers.map(user => (
                 <motion.div
@@ -651,7 +611,6 @@ export default function AdminDashboard() {
                       <span
                         title={user.transactionHash}
                         className="text-xs text-gray-400 truncate max-w-[150px] hover:text-purple-400 cursor-pointer"
-                        onClick={() => console.log("Transaction hash:", user.transactionHash)}
                       >
                         {user.transactionHash.substring(0, 10)}...
                       </span>
@@ -715,7 +674,7 @@ export default function AdminDashboard() {
                 </span>
               )}
             </h2>
-            <p className="text-gray-400 mb-10">These users have been approved and can access the platform.</p>
+            <p className="text-gray-400 mb-10">These users have been approved and paid for platform access.</p>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {approvedUsers.map(user => (
                 <motion.div

@@ -7,6 +7,7 @@ export interface TransactionData {
   paymentConfirmed: boolean;
   ipfsHash?: string;
   status?: 'pending' | 'approved' | 'rejected';
+  additionalData?: Record<string, any>; // For storing credential information
 }
 
 // Pinata API Credentials
