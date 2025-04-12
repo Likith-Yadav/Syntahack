@@ -9,7 +9,7 @@ interface VerificationRecord {
   verifierName: string;
   verifierAddress: string;
   timestamp: number;
-  status: 'valid' | 'invalid' | 'pending';
+  status: 'valid' | 'invalid';
 }
 
 interface VerificationHistoryProps {
@@ -22,10 +22,10 @@ export default function VerificationHistory({ history }: VerificationHistoryProp
   const [selectedRecord, setSelectedRecord] = useState<VerificationRecord | null>(null);
   
   // Filter history based on search
-  const filteredHistory = history.filter(record => 
-    record.credentialTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    record.verifierName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredHistory = history.map(record => ({
+    ...record,
+    status: 'valid' as 'valid'
+  }));
   
   // Sort by timestamp
   const sortedHistory = [...filteredHistory].sort((a, b) => {
@@ -46,26 +46,22 @@ export default function VerificationHistory({ history }: VerificationHistoryProp
   };
 
   // Get status icon
-  const getStatusIcon = (status: 'valid' | 'invalid' | 'pending') => {
+  const getStatusIcon = (status: 'valid' | 'invalid') => {
     switch (status) {
       case 'valid':
         return <CheckIcon className="w-5 h-5 text-green-500" />;
       case 'invalid':
         return <XMarkIcon className="w-5 h-5 text-red-500" />;
-      case 'pending':
-        return <ClockIcon className="w-5 h-5 text-yellow-500" />;
     }
   };
 
   // Get status color
-  const getStatusColor = (status: 'valid' | 'invalid' | 'pending') => {
+  const getStatusColor = (status: 'valid' | 'invalid') => {
     switch (status) {
       case 'valid':
         return 'text-green-500 bg-green-500/10 border-green-500/20';
       case 'invalid':
         return 'text-red-500 bg-red-500/10 border-red-500/20';
-      case 'pending':
-        return 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20';
     }
   };
 
@@ -119,20 +115,6 @@ export default function VerificationHistory({ history }: VerificationHistoryProp
                 <p className="text-sm text-gray-400 mb-1">Credential ID</p>
                 <p className="text-white break-all">{selectedRecord.credentialId}</p>
               </div>
-            </div>
-            
-            {/* Action buttons */}
-            <div className="flex justify-end">
-              <button
-                onClick={() => {
-                  const verifyUrl = `${window.location.origin}/verify?id=${selectedRecord.credentialId}`;
-                  window.open(verifyUrl, '_blank');
-                }}
-                className="flex items-center px-6 py-3 rounded-xl bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 transition-all duration-300 text-purple-400 hover:text-purple-300"
-              >
-                <ArrowTopRightOnSquareIcon className="w-5 h-5 mr-2" />
-                View Verification Page
-              </button>
             </div>
           </div>
         ) : (

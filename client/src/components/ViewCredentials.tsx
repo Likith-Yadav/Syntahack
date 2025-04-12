@@ -1,15 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useActiveAccount } from 'thirdweb/react';
 import { DocumentTextIcon, AcademicCapIcon, CalendarIcon, ClockIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline';
-import { Credential } from '../services/credentialService';
+import { Credential, getStudentCredentials } from '../services/credentialService';
+import { retrieveTransactionData } from '../services/ipfsService';
 
-interface ViewCredentialsProps {
-  credentials: Credential[];
-}
-
-export default function ViewCredentials({ credentials }: ViewCredentialsProps) {
+export default function ViewCredentials({ credentials }: { credentials: Credential[] }) {
+  const account = useActiveAccount();
+  const [loading, setLoading] = useState(true);
   const [selectedCredential, setSelectedCredential] = useState<Credential | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [validatedId, setValidatedId] = useState<string | null>(null);
 
   // Filter credentials based on search
   const filteredCredentials = credentials.filter(credential => 
@@ -25,6 +27,26 @@ export default function ViewCredentials({ credentials }: ViewCredentialsProps) {
       month: 'long',
       day: 'numeric'
     });
+  };
+
+  const updateVerificationStatus = (credentialId: string) => {
+    // Example: Update local storage or state
+    const history = JSON.parse(localStorage.getItem('verification_history') || '[]');
+    const updatedHistory = history.map((item: any) =>
+      item.credentialId === credentialId ? { ...item, status: 'Validated' } : item
+    );
+    localStorage.setItem('verification_history', JSON.stringify(updatedHistory));
+  };
+
+  const handleCopyVerificationLink = (credentialId: string) => {
+    navigator.clipboard.writeText(credentialId);
+    setCopiedId(credentialId);
+    setTimeout(() => setCopiedId(null), 2000);
+    
+    // Set validation status immediately
+    setValidatedId(credentialId);
+    updateVerificationStatus(credentialId);
+    setTimeout(() => setValidatedId(null), 3000);
   };
 
   return (
@@ -67,6 +89,12 @@ export default function ViewCredentials({ credentials }: ViewCredentialsProps) {
               <br/>
               2. The institution has issued credentials to your current wallet address
             </p>
+            <button
+              onClick={() => setSelectedCredential(null)}
+              className="mt-4 px-6 py-3 rounded-xl bg-purple-500/10 border-2 border-purple-500/20 hover:bg-purple-500/20 transition-all duration-300 text-purple-400 hover:text-purple-300 font-medium"
+            >
+              Back
+            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -104,11 +132,12 @@ export default function ViewCredentials({ credentials }: ViewCredentialsProps) {
 
       {/* Credential Details Modal */}
       {selectedCredential && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-x-0 top-16 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-gradient-to-b from-purple-900/30 to-black/90 border-2 border-purple-500/30 rounded-2xl p-8 w-full max-w-2xl shadow-2xl shadow-purple-500/10"
+            className="bg-gradient-to-b from-purple-900/30 to-black/90 border-2 border-purple-500/30 rounded-2xl p-8 w-full max-w-2xl shadow-2xl shadow-purple-500/10 overflow-y-auto max-h-[80vh]"
+            style={{ paddingTop: '20px', paddingBottom: '20px' }}
           >
             <div className="flex justify-between items-start mb-6">
               <div className="flex items-center">
@@ -168,11 +197,31 @@ export default function ViewCredentials({ credentials }: ViewCredentialsProps) {
               {/* Credential ID (for verification purposes) */}
               <div>
                 <h4 className="text-sm font-medium text-purple-300 mb-2">Credential ID</h4>
-                <div className="bg-black/40 rounded-xl p-3 text-xs text-gray-400 break-all">
-                  {selectedCredential.id}
+                <div className="flex gap-2">
+                  <div className="flex-1 bg-black/40 rounded-xl p-3 text-xs text-gray-400 break-all">
+                    {selectedCredential.id}
+                  </div>
+                  <button
+                    onClick={() => handleCopyVerificationLink(selectedCredential.id)}
+                    className={`px-4 py-2 rounded-xl ${
+                      copiedId === selectedCredential.id
+                        ? "bg-green-500/10 border-2 border-green-500/20 hover:bg-green-500/20 transition-all duration-300 text-green-400 hover:text-green-300"
+                        : validatedId === selectedCredential.id
+                        ? "bg-green-500/20 border-2 border-green-500/40 text-green-300"
+                        : "bg-purple-500/10 border-2 border-purple-500/20 text-purple-400 hover:text-purple-300 font-medium"
+                    }`}
+                  >
+                    {copiedId === selectedCredential.id 
+                      ? 'Copied!' 
+                      : validatedId === selectedCredential.id
+                      ? 'Validated!'
+                      : 'Copy ID'}
+                  </button>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  This ID can be used to verify the authenticity of this credential.
+                  {validatedId === selectedCredential.id
+                    ? "Credential has been successfully validated!"
+                    : "Share this ID with verifiers to validate your credential."}
                 </p>
               </div>
 
@@ -194,14 +243,10 @@ export default function ViewCredentials({ credentials }: ViewCredentialsProps) {
                   View on IPFS
                 </button>
                 <button
-                  onClick={() => {
-                    const shareUrl = `${window.location.origin}/verify?id=${selectedCredential.id}`;
-                    navigator.clipboard.writeText(shareUrl);
-                    alert('Verification URL copied to clipboard!');
-                  }}
+                  onClick={() => setSelectedCredential(null)}
                   className="px-6 py-3 rounded-xl bg-purple-500/10 border-2 border-purple-500/20 hover:bg-purple-500/20 transition-all duration-300 text-purple-400 hover:text-purple-300 font-medium"
                 >
-                  Copy Verification Link
+                  Back
                 </button>
               </div>
             </div>

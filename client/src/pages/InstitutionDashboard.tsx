@@ -32,18 +32,6 @@ export default function InstitutionDashboard() {
       // Load students and credentials when dashboard loads
       loadStudents();
       loadCredentials();
-      
-      // Check if institution name is saved
-      const institutionName = localStorage.getItem(`institutionName_${account.address.toLowerCase()}`);
-      if (!institutionName) {
-        // If no name is saved, prompt for institution name
-        setTimeout(() => {
-          const name = prompt("Please enter your institution name for credential issuance:");
-          if (name) {
-            localStorage.setItem(`institutionName_${account.address.toLowerCase()}`, name);
-          }
-        }, 1000);
-      }
     }
   }, [account?.address]);
 

@@ -1,4 +1,11 @@
-import { storeTransactionData, retrieveTransactionData } from './ipfsService';
+import { 
+  mockStoreTransactionData, 
+  mockRetrieveTransactionData, 
+  mockGetStudents,
+  mockGetCredentials,
+  mockVerifyCredential,
+  mockGetUserRole
+} from './mockService';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface Credential {
@@ -20,6 +27,15 @@ export interface Student {
   name: string;
   email: string;
   registrationDate: number;
+  department: string;
+  credentialsCount: number;
+  status: string;
+}
+
+export interface VerificationResult {
+  isValid: boolean;
+  credential?: Credential;
+  message: string;
 }
 
 /**
@@ -30,27 +46,36 @@ export const issueCredential = async (
   institutionAddress: string
 ): Promise<{ success: boolean; hash?: string; error?: string }> => {
   try {
-    // Store credential on IPFS
-    const hash = await storeTransactionData({
+    // Ensure metadata fields are included
+    const credentialWithMetadata = {
+      ...credential,
+      metadata: {
+        ...credential.metadata,
+        specialization: credential.metadata?.specialization || '',
+        projects: credential.metadata?.projects || [],
+        duration: credential.metadata?.duration || '',
+        grade: credential.metadata?.grade || '',
+        completionStatus: credential.metadata?.completionStatus || 'Completed'
+      }
+    };
+
+    // Store credential using mock IPFS
+    const hash = await mockStoreTransactionData({
       address: institutionAddress,
       role: 'institution',
       timestamp: Date.now(),
-      transactionHash: `credential_${credential.id}`,
-      additionalData: { credential },
+      transactionHash: `credential_${credentialWithMetadata.id}`,
+      additionalData: { credential: credentialWithMetadata },
       paymentConfirmed: true,
       status: 'approved'
     });
 
     // Save credential to local storage
-    saveCredentialToLocalStorage(credential, institutionAddress);
+    saveCredentialToLocalStorage(credentialWithMetadata, institutionAddress);
 
     return { success: true, hash };
   } catch (error) {
     console.error('Error issuing credential:', error);
-    
-    // Even if IPFS fails, we still save to localStorage as fallback
-    saveCredentialToLocalStorage(credential, institutionAddress);
-    
     return { 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 
@@ -93,107 +118,76 @@ export const saveCredentialToLocalStorage = (
 /**
  * Verify a credential by ID
  */
-export const verifyCredential = async (
-  credentialId: string,
-  ipfsHash?: string
-): Promise<{ isValid: boolean; credential?: Credential; message: string }> => {
+export async function verifyCredential(credentialId: string, verifierAddress: string): Promise<VerificationResult> {
   try {
-    // If we have an IPFS hash, try to retrieve from IPFS first
-    if (ipfsHash) {
-      const data = await retrieveTransactionData(ipfsHash);
-      if (data && data.additionalData?.credential && data.additionalData.credential.id === credentialId) {
-        return { 
-          isValid: true, 
-          credential: data.additionalData.credential as Credential,
-          message: "Credential successfully verified on IPFS."
-        };
-      }
+    const isValid = mockVerifyCredential(credentialId);
+    const credential = mockGetCredentials().find((c: Credential) => c.id === credentialId);
+
+    if (!credential) {
+      return {
+        isValid: false,
+        message: 'Credential not found'
+      };
     }
-    
-    // Fallback to local verification (in a real app, this would query the blockchain)
-    // First check student-specific storage
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith('student_credentials_')) {
-        const credentials = JSON.parse(localStorage.getItem(key) || '[]');
-        const found = credentials.find((c: Credential) => c.id === credentialId);
-        if (found) {
-          return { 
-            isValid: true, 
-            credential: found,
-            message: "Credential successfully verified."
-          };
-        }
-      }
+
+    if (!isValid) {
+      return {
+        isValid: false,
+        message: 'Credential verification failed',
+        credential
+      };
     }
+
+    // Record verification in student's history
+    const studentHistory = localStorage.getItem(`verification_history_${credential.studentWallet.toLowerCase()}`);
+    const history = studentHistory ? JSON.parse(studentHistory) : [];
     
-    // Then check institution storage
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith('credentials_')) {
-        const credentials = JSON.parse(localStorage.getItem(key) || '[]');
-        const found = credentials.find((c: Credential) => c.id === credentialId);
-        if (found) {
-          return { 
-            isValid: true, 
-            credential: found,
-            message: "Credential successfully verified."
-          };
-        }
-      }
-    }
+    const verificationRecord = {
+      id: `verify_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      credentialId: credential.id,
+      credentialTitle: credential.title,
+      verifierName: 'Demo Verifier',
+      verifierAddress: verifierAddress.toLowerCase(),
+      timestamp: Date.now(),
+      status: 'valid'
+    };
     
-    return { 
-      isValid: false, 
-      message: "Credential not found. It may have been revoked or does not exist."
+    history.push(verificationRecord);
+    localStorage.setItem(
+      `verification_history_${credential.studentWallet.toLowerCase()}`,
+      JSON.stringify(history)
+    );
+
+    // Also record in verifier's history
+    const verifierHistory = localStorage.getItem(`verifier_history_${verifierAddress.toLowerCase()}`);
+    const verifierRecords = verifierHistory ? JSON.parse(verifierHistory) : [];
+    verifierRecords.push(verificationRecord);
+    localStorage.setItem(
+      `verifier_history_${verifierAddress.toLowerCase()}`,
+      JSON.stringify(verifierRecords)
+    );
+
+    return {
+      isValid: true,
+      credential,
+      message: 'Credential verified successfully'
     };
   } catch (error) {
     console.error('Error verifying credential:', error);
-    return { 
-      isValid: false, 
-      message: error instanceof Error ? error.message : 'Unknown error verifying credential.' 
+    return {
+      isValid: false,
+      message: error instanceof Error ? error.message : 'Failed to verify credential'
     };
   }
-};
+}
 
 /**
  * Get all credentials for a student by wallet address
  */
 export const getStudentCredentials = (studentWallet: string): Credential[] => {
-  let credentials: Credential[] = [];
-  
-  try {
-    // First check for direct student credentials
-    const studentKey = `student_credentials_${studentWallet.toLowerCase()}`;
-    const stored = localStorage.getItem(studentKey);
-    
-    if (stored) {
-      credentials = JSON.parse(stored);
-    } else {
-      // If no direct storage, check all institution storage
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('credentials_')) {
-          const institutionCredentials = JSON.parse(localStorage.getItem(key) || '[]');
-          const studentCredentials = institutionCredentials.filter(
-            (c: Credential) => c.studentWallet.toLowerCase() === studentWallet.toLowerCase()
-          );
-          credentials.push(...studentCredentials);
-        }
-      }
-    }
-    
-    // If no credentials found and this is development environment, generate sample data
-    if (import.meta.env.DEV && credentials.length === 0) {
-      const sampleCredentials = generateSampleCredentials(studentWallet);
-      localStorage.setItem(studentKey, JSON.stringify(sampleCredentials));
-      credentials = sampleCredentials;
-    }
-  } catch (error) {
-    console.error('Error fetching student credentials:', error);
-  }
-  
-  return credentials;
+  return mockGetCredentials().filter(
+    (cred: Credential) => cred.studentWallet.toLowerCase() === studentWallet.toLowerCase()
+  );
 };
 
 /**
@@ -238,19 +232,11 @@ export function addCredential(credential: Credential): boolean {
 /**
  * Get credentials issued by an institution
  */
-export function getInstitutionCredentials(institutionWallet: string): Credential[] {
-  try {
-    // Check localStorage for institution's issued credentials
-    const stored = localStorage.getItem(`credentials_${institutionWallet.toLowerCase()}`);
-    if (stored) {
-      return JSON.parse(stored);
-    }
-    return [];
-  } catch (error) {
-    console.error("Error getting institution credentials:", error);
-    return [];
-  }
-}
+export const getInstitutionCredentials = (institutionWallet: string): Credential[] => {
+  return mockGetCredentials().filter(
+    (cred: Credential) => cred.issuerWallet.toLowerCase() === institutionWallet.toLowerCase()
+  );
+};
 
 /**
  * Helper function to generate sample credentials for development/testing
@@ -314,4 +300,10 @@ function generateSampleCredentials(studentWallet: string): Credential[] {
       }
     }
   ];
-} 
+}
+
+export const getStudents = async (): Promise<Student[]> => {
+  return mockGetStudents();
+};
+
+export { mockGetCredentials } from './mockService'; 

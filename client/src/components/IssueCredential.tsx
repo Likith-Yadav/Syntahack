@@ -64,6 +64,11 @@ export default function IssueCredential({ saveCredential }: IssueCredentialProps
       return;
     }
 
+    if (!account?.address) {
+      alert("Please connect your wallet to issue credentials");
+      return;
+    }
+
     setIssuanceStatus('processing');
 
     try {
@@ -71,6 +76,16 @@ export default function IssueCredential({ saveCredential }: IssueCredentialProps
       const student = students.find(s => s.id === selectedStudent);
       if (!student) {
         throw new Error("Selected student not found");
+      }
+
+      // Validate wallet address format
+      if (!/^0x[a-fA-F0-9]{40}$/.test(student.walletAddress)) {
+        throw new Error("Invalid student wallet address format");
+      }
+
+      // Validate institution wallet
+      if (!/^0x[a-fA-F0-9]{40}$/.test(account.address)) {
+        throw new Error("Invalid institution wallet address format");
       }
 
       // Create metadata from custom fields
@@ -81,8 +96,18 @@ export default function IssueCredential({ saveCredential }: IssueCredentialProps
         }
       });
 
-      // Add expiry date if provided
-      const expiry = expiryDate ? new Date(expiryDate).getTime() : undefined;
+      // Validate expiry date if provided
+      let expiry: number | undefined;
+      if (expiryDate) {
+        const expiryTimestamp = new Date(expiryDate).getTime();
+        if (isNaN(expiryTimestamp)) {
+          throw new Error("Invalid expiry date format");
+        }
+        if (expiryTimestamp <= Date.now()) {
+          throw new Error("Expiry date must be in the future");
+        }
+        expiry = expiryTimestamp;
+      }
 
       // Create credential object
       const newCredential: Credential = {
@@ -90,16 +115,16 @@ export default function IssueCredential({ saveCredential }: IssueCredentialProps
         title,
         description,
         studentName: student.name,
-        studentWallet: student.walletAddress,
-        issuerName: localStorage.getItem(`institutionName_${account?.address?.toLowerCase()}`) || "Educational Institution",
-        issuerWallet: account?.address || '',
+        studentWallet: student.walletAddress.toLowerCase(), // Normalize wallet address
+        issuerName: localStorage.getItem(`institutionName_${account.address.toLowerCase()}`) || "Educational Institution",
+        issuerWallet: account.address.toLowerCase(), // Normalize wallet address
         issueDate: Date.now(),
         expiryDate: expiry,
         metadata: Object.keys(metadata).length > 0 ? metadata : undefined
       };
 
       // Issue the credential
-      const result = await issueCredential(newCredential, account?.address || '');
+      const result = await issueCredential(newCredential, account.address);
       
       if (result.success) {
         setCredentialHash(result.hash || null);
@@ -123,6 +148,7 @@ export default function IssueCredential({ saveCredential }: IssueCredentialProps
     } catch (error) {
       console.error("Error issuing credential:", error);
       setIssuanceStatus('error');
+      alert(error instanceof Error ? error.message : "Failed to issue credential. Please try again.");
     }
   };
 

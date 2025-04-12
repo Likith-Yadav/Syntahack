@@ -14,11 +14,14 @@ import InstitutionDashboard from "./pages/InstitutionDashboard";
 import StudentDashboard from "./pages/StudentDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import TransactionVerifier from "./components/TransactionVerifier";
+import VerifyCredential from './components/VerifyCredential';
+import VerifierDashboard from './components/VerifierDashboard';
+import { UserRole } from './types';
 
 // Define the PendingUser interface to match what's used in AdminDashboard.tsx
 interface PendingUser {
 	address: string;
-	role: "institution" | "student";
+	role: UserRole;
 	timestamp: number;
 	paymentConfirmed?: boolean;
 	transactionHash?: string;
@@ -29,7 +32,8 @@ interface PendingUser {
 function AppContent() {
 	const [showAurora, setShowAurora] = useState(true);
 	const [showRoleModal, setShowRoleModal] = useState(false);
-	const [selectedRole, setSelectedRole] = useState<"institution" | "student" | null>(null);
+	const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
+	const [userRole, setUserRole] = useState<UserRole | null>(null);
 	const { scrollY } = useScroll();
 	const account = useActiveAccount();
 	const { disconnect } = useDisconnect();
@@ -155,11 +159,11 @@ function AppContent() {
 	};
 	
 	// Helper function to get user's role
-	const getUserRole = (address: string): "institution" | "student" | null => {
+	const getUserRole = (address: string): UserRole | null => {
 		// Check direct role storage first (faster)
 		const userRoleDirectly = window.localStorage.getItem(`role_${address}`);
 		if (userRoleDirectly) {
-			return userRoleDirectly as "institution" | "student";
+			return userRoleDirectly as UserRole;
 		}
 		
 		// Fall back to approved users check
@@ -171,7 +175,7 @@ function AppContent() {
 					(user: any) => user.address.toLowerCase() === address
 				);
 				if (foundUser) {
-					return foundUser.role as "institution" | "student";
+					return foundUser.role as UserRole;
 				}
 			}
 		} catch (error) {
@@ -182,11 +186,23 @@ function AppContent() {
 	};
 	
 	// Helper function to navigate to the appropriate dashboard
-	const navigateToDashboard = (role: "institution" | "student") => {
-		if (role === "institution") {
-			navigate("/institution-dashboard");
-		} else if (role === "student") {
-			navigate("/student-dashboard");
+	const navigateToDashboard = (role: UserRole) => {
+		switch (role) {
+			case 'institution':
+				navigate("/institution-dashboard");
+				break;
+			case 'student':
+				navigate("/student-dashboard");
+				break;
+			case 'verifier':
+				navigate("/verifier-dashboard");
+				break;
+			case 'admin':
+				navigate("/admin-dashboard");
+				break;
+			default:
+				console.error("Unknown role:", role);
+				break;
 		}
 	};
 
@@ -212,7 +228,7 @@ function AppContent() {
 		}
 	}, []);
 
-	const handleRoleSelect = (role: "institution" | "student") => {
+	const handleRoleSelect = (role: UserRole) => {
 		if (!account?.address) {
 			console.error("No account address available for role selection");
 			return;
@@ -244,59 +260,40 @@ function AppContent() {
 			console.log("Existing approvedUsers from localStorage:", approvedUsers);
 		} catch (error) {
 			console.error("Error parsing approvedUsers from localStorage:", error);
-			approvedUsers = [];
 		}
 
-		// Remove any existing users with this address to avoid duplicates
-		approvedUsers = approvedUsers.filter(
-			(user: any) => user.address.toLowerCase() !== normalizedAddress
-		);
-		console.log("Approved users after filtering existing records:", approvedUsers);
-
-		// Add the new approved user
+		// Add the new user to the list
 		approvedUsers.push(newUser);
-		console.log("Approved users after adding new user:", approvedUsers);
 
-		// Save user data in multiple locations for persistent role tracking
-		try {
-			// 1. Save to approvedUsers array
-			window.localStorage.setItem("approvedUsers", JSON.stringify(approvedUsers));
-			
-			// 2. Direct role storage (primary lookup method)
-			window.localStorage.setItem(`role_${normalizedAddress}`, role);
-			
-			// 3. User-specific role
-			window.localStorage.setItem(`user_role_${normalizedAddress}`, role);
-			
-			// 4. Mark as onboarded
-			window.localStorage.setItem(`onboarded_${normalizedAddress}`, "true");
-			
-			// 5. User profile data
-			window.localStorage.setItem(`profile_${normalizedAddress}`, JSON.stringify({
-				address: normalizedAddress,
-				role: role,
-				timestamp: Date.now(),
-				status: "active"
-			}));
-			
-			console.log(`Role data for ${normalizedAddress} stored in multiple locations`);
-		} catch (error) {
-			console.error("Error saving role data to localStorage:", error);
-		}
+		// Save the updated list back to localStorage
+		window.localStorage.setItem("approvedUsers", JSON.stringify(approvedUsers));
+		console.log("Updated approvedUsers saved to localStorage:", approvedUsers);
 
-		// Hide modal and navigate directly to dashboard
-		setShowRoleModal(false);
-		
-		// Navigate to appropriate dashboard based on role
-		if (role === "institution") {
-			navigate("/institution-dashboard");
-		} else if (role === "student") {
-			navigate("/student-dashboard");
-		}
+		// Also store the role directly for faster access
+		window.localStorage.setItem(`role_${normalizedAddress}`, role);
+		console.log(`Role ${role} stored directly for address ${normalizedAddress}`);
+
+		// Navigate to the appropriate dashboard
+		navigateToDashboard(role);
 	};
 
 	const handleConnect = () => {
 		// This will be handled by the useEffect above
+	};
+
+	const renderDashboard = () => {
+		switch (selectedRole) {
+			case 'student':
+				return <StudentDashboard />;
+			case 'institution':
+				return <InstitutionDashboard />;
+			case 'admin':
+				return <AdminDashboard />;
+			case 'verifier':
+				return <VerifierDashboard />;
+			default:
+				return <div>Loading...</div>;
+		}
 	};
 
 	return (
@@ -611,302 +608,333 @@ function AppContent() {
 				</nav>
 
 				{/* Role Selection Modal - Only show if user has no role */}
-				{showRoleModal && !isAdmin && !selectedRole && (
+				{showRoleModal && (
 					<RoleSelectionModal
-						onSelectRole={handleRoleSelect}
+						onSelect={handleRoleSelect}
 						onClose={() => setShowRoleModal(false)}
 					/>
 				)}
 
 				{/* Routes */}
-				<Routes>
-					<Route path="/" element={
-						<>
-							{/* Hero Section */}
-							<section id="hero" className="relative min-h-screen flex flex-col items-center justify-center px-4 pt-24 z-10">
-								<motion.div
-									initial={{ opacity: 0, y: 20 }}
-									animate={{ opacity: 1, y: 0 }}
-									transition={{ duration: 0.8 }}
-									className="text-center max-w-5xl mx-auto z-10"
-								>
-									<motion.h1 
-										initial={{ opacity: 0, y: 20 }}
-										animate={{ opacity: 1, y: 0 }}
-										transition={{ duration: 0.8, delay: 0.2 }}
-										className="text-6xl md:text-8xl font-light mb-6 leading-tight tracking-tight"
-									>
-										PURE <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#3A29FF] via-[#FF94B4] to-[#FF3232] animate-gradient">INNOVATION</span>
-										<br />
-										<span className="text-transparent bg-clip-text bg-gradient-to-br from-[#3A29FF] via-[#FF94B4] to-[#FF3232] animate-gradient">NEW</span> GENERATION
-									</motion.h1>
-									<motion.p 
-										initial={{ opacity: 0, y: 20 }}
-										animate={{ opacity: 1, y: 0 }}
-										transition={{ duration: 0.8, delay: 0.4 }}
-										className="text-xl md:text-2xl text-gray-400 mb-12 max-w-3xl mx-auto font-light tracking-wide"
-									>
-										Experience the future of decentralized technology with our next-generation blockchain platform
-									</motion.p>
+				<div className="relative z-10">
+					<Routes>
+						<Route path="/" element={
+							<>
+								{/* Hero Section */}
+								<section id="hero" className="relative min-h-screen flex flex-col items-center justify-center px-4 pt-24 z-10">
 									<motion.div
 										initial={{ opacity: 0, y: 20 }}
 										animate={{ opacity: 1, y: 0 }}
-										transition={{ duration: 0.8, delay: 0.6 }}
-										className="flex justify-center items-center mb-16"
+										transition={{ duration: 0.8 }}
+										className="text-center max-w-5xl mx-auto z-10"
 									>
-										{!account && (
-											<div className="relative group">
-												<div className="absolute -inset-0.5 bg-gradient-to-r from-[#3A29FF] via-[#FF94B4] to-[#FF3232] rounded-xl blur opacity-50 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
-												<div className="relative bg-black rounded-xl">
-													<ConnectButton
-														client={client}
-														appMetadata={{
-															name: "Synthack",
-															url: "https://synthack.tech",
-														}}
+										<motion.h1 
+											initial={{ opacity: 0, y: 20 }}
+											animate={{ opacity: 1, y: 0 }}
+											transition={{ duration: 0.8, delay: 0.2 }}
+											className="text-6xl md:text-8xl font-light mb-6 leading-tight tracking-tight"
+										>
+											PURE <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#3A29FF] via-[#FF94B4] to-[#FF3232] animate-gradient">INNOVATION</span>
+											<br />
+											<span className="text-transparent bg-clip-text bg-gradient-to-br from-[#3A29FF] via-[#FF94B4] to-[#FF3232] animate-gradient">NEW</span> GENERATION
+										</motion.h1>
+										<motion.p 
+											initial={{ opacity: 0, y: 20 }}
+											animate={{ opacity: 1, y: 0 }}
+											transition={{ duration: 0.8, delay: 0.4 }}
+											className="text-xl md:text-2xl text-gray-400 mb-12 max-w-3xl mx-auto font-light tracking-wide"
+										>
+											Experience the future of decentralized technology with our next-generation blockchain platform
+										</motion.p>
+										<motion.div
+											initial={{ opacity: 0, y: 20 }}
+											animate={{ opacity: 1, y: 0 }}
+											transition={{ duration: 0.8, delay: 0.6 }}
+											className="flex justify-center items-center mb-16"
+										>
+											{!account && (
+												<div className="relative group">
+													<div className="absolute -inset-0.5 bg-gradient-to-r from-[#3A29FF] via-[#FF94B4] to-[#FF3232] rounded-xl blur opacity-50 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
+													<div className="relative bg-black rounded-xl">
+														<ConnectButton
+															client={client}
+															appMetadata={{
+																name: "Synthack",
+																url: "https://synthack.tech",
+															}}
+														/>
+													</div>
+												</div>
+											)}
+										</motion.div>
+									</motion.div>
+
+									<motion.div
+										animate={{ y: [0, 10, 0] }}
+										transition={{ duration: 2, repeat: Infinity }}
+										className="absolute bottom-12 items-center justify-center -translate-x-1/2"
+									>
+										<ArrowDownIcon className="h-8 w-8 text-purple-500 animate-pulse" />
+									</motion.div>
+								</section>
+								{/* Features Section */}
+								<section id="features" className="relative py-32 px-4 z-10">
+									<div className="max-w-6xl mx-auto">
+										<motion.div
+											initial={{ opacity: 0 }}
+											whileInView={{ opacity: 1 }}
+											transition={{ duration: 1 }}
+											className="grid md:grid-cols-3 gap-8"
+										>
+											<FeatureCard
+												icon={<SparklesIcon className="h-12 w-12 text-purple-500" />}
+												title="ACADEMIC PASSPORT"
+												description={
+													<DecryptedText
+														text="A secure digital wallet for students to store and manage their academic credentials with complete control and portability."
+														animateOn="view"
+														revealDirection="center"
+														className="text-gray-400"
+														encryptedClassName="text-gray-600"
+														speed={30}
+														maxIterations={8}
+													/>
+												}
+											/>
+											<FeatureCard
+												icon={<ShieldCheckIcon className="h-12 w-12 text-purple-500" />}
+												title="TAMPER-PROOF SECURITY"
+												description={
+													<DecryptedText
+														text="Blockchain-powered verification with cryptographic signatures ensuring 100% credential authenticity and integrity."
+														animateOn="view"
+														revealDirection="center"
+														className="text-gray-400"
+														encryptedClassName="text-gray-600"
+														speed={30}
+														maxIterations={8}
+													/>
+												}
+											/>
+											<FeatureCard
+												icon={<RocketLaunchIcon className="h-12 w-12 text-purple-500" />}
+												title="INSTANT VERIFICATION"
+												description={
+													<DecryptedText
+														text="Reduce verification time by 89% with our 24/7 automated credential verification system."
+														animateOn="view"
+														revealDirection="center"
+														className="text-gray-400"
+														encryptedClassName="text-gray-600"
+														speed={30}
+														maxIterations={8}
+													/>
+												}
+											/>
+										</motion.div>
+									</div>
+								</section>
+								{/* About Section */}
+								<section id="about" className="relative py-32 px-4 overflow-hidden z-10">
+									<motion.div 
+										initial={{ opacity: 0, y: 40 }}
+										whileInView={{ opacity: 1, y: 0 }}
+										transition={{ duration: 0.8 }}
+										className="max-w-4xl mx-auto text-center"
+									>
+										<h2 className="text-3xl md:text-4xl font-light mb-6 tracking-tight">About EduChain</h2>
+										<p className="text-gray-400 mb-12 max-w-3xl mx-auto leading-relaxed">
+											EduChain is a revolutionary blockchain-based academic credential verification system that transforms how educational institutions issue, manage, and verify academic credentials. Our platform reduces verification time by 89% and administrative costs by 82%, while ensuring tamper-proof security through advanced blockchain technology.
+										</p>
+										<div className="grid md:grid-cols-3 gap-8 text-left">
+											<div className="p-6 bg-purple-500/5 border border-purple-500/20 rounded-lg">
+												<h3 className="text-purple-500 font-light mb-3">Publisher Tool</h3>
+												<p className="text-gray-400 text-sm">
+													Our intuitive Publisher Tool enables educational institutions to issue and manage academic credentials with ease. Features include:
+												</p>
+												<ul className="mt-2 text-gray-400 text-sm space-y-1">
+													<li>• Secure credential issuance</li>
+													<li>• Batch processing capabilities</li>
+													<li>• Real-time status tracking</li>
+													<li>• Custom credential templates</li>
+												</ul>
+											</div>
+											<div className="p-6 bg-purple-500/5 border border-purple-500/20 rounded-lg">
+												<h3 className="text-purple-500 font-light mb-3">Academic Passport</h3>
+												<p className="text-gray-400 text-sm">
+													Students maintain a secure digital wallet of their academic achievements with our Academic Passport:
+												</p>
+												<ul className="mt-2 text-gray-400 text-sm space-y-1">
+													<li>• Portable credential storage</li>
+													<li>• One-click sharing</li>
+													<li>• Lifetime access</li>
+													<li>• Privacy controls</li>
+												</ul>
+											</div>
+											<div className="p-6 bg-purple-500/5 border border-purple-500/20 rounded-lg">
+												<h3 className="text-purple-500 font-light mb-3">Verification Portal</h3>
+												<p className="text-gray-400 text-sm">
+													Employers and institutions can instantly verify credentials through our Verification Portal:
+												</p>
+												<ul className="mt-2 text-gray-400 text-sm space-y-1">
+													<li>• Instant verification</li>
+													<li>• Blockchain-powered security</li>
+													<li>• Detailed credential history</li>
+													<li>• API integration options</li>
+												</ul>
+											</div>
+										</div>
+									</motion.div>
+								</section>
+								{/* Team Section */}
+								<section id="partners" className="relative py-32 px-4 overflow-hidden z-10">
+									<motion.div 
+										initial={{ opacity: 0, y: 40 }}
+										whileInView={{ opacity: 1, y: 0 }}
+										transition={{ duration: 0.8 }}
+										className="max-w-6xl mx-auto text-center"
+									>
+										<h2 className="text-3xl md:text-4xl font-light mb-6 tracking-tight">Meet Our Team</h2>
+										<p className="text-gray-400 mb-12 max-w-2xl mx-auto">
+											The innovative minds behind EduChain's blockchain revolution
+										</p>
+										<div className="relative w-full h-[600px] flex items-center justify-center">
+											{/* Orb container with relative positioning for team members */}
+											<div className="relative w-[500px] h-[500px] group">
+												{/* The Orb */}
+												<div className="absolute inset-0 z-0 pointer-events-auto">
+													<Orb
+														hoverIntensity={0.8}
+														rotateOnHover={true}
+														hue={240}
+														forceHoverState={false}
 													/>
 												</div>
+
+												{/* Rotating container for team members */}
+												<motion.div 
+													className="absolute inset-0 z-10 pointer-events-none"
+													animate={{ rotate: 360 }}
+													transition={{ 
+														duration: 30,
+														repeat: Infinity,
+														ease: "linear"
+													}}
+												>
+													{/* Top member */}
+													<motion.div 
+														className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2"
+														animate={{ rotate: -360 }}
+														transition={{ 
+															duration: 30,
+															repeat: Infinity,
+															ease: "linear"
+														}}
+													>
+														<div className="flex flex-col items-center space-y-3">
+															<div className="h-32 w-32 rounded-full bg-purple-500/10 border-2 border-purple-500/20 overflow-hidden backdrop-blur-sm">
+																<img 
+																	src="https://media.licdn.com/dms/image/v2/D4D03AQH-jGdrNyBaOQ/profile-displayphoto-shrink_400_400/B4DZOPaWyNHMAk-/0/1733277884553?e=1749686400&v=beta&t=KLkNnNTGhcuibyjup2oKiCqKSXaq9Wmdg8xC14t9oVw"
+																	alt="Likith"
+																	className="w-full h-full object-cover"
+																/>
+															</div>
+														</div>
+													</motion.div>
+
+													{/* Right member */}
+													<motion.div 
+														className="absolute top-1/2 right-0 translate-x-1/2 -translate-y-1/2"
+														animate={{ rotate: -360 }}
+														transition={{ 
+															duration: 30,
+															repeat: Infinity,
+															ease: "linear"
+														}}
+													>
+														<div className="flex flex-col items-center space-y-3">
+															<div className="h-32 w-32 rounded-full bg-purple-500/10 border-2 border-purple-500/20 overflow-hidden backdrop-blur-sm">
+																<img 
+																	src="https://media.licdn.com/dms/image/v2/D5603AQHTzBVD38cS_w/profile-displayphoto-shrink_400_400/B56ZOSO4GeGsAk-/0/1733325194494?e=1749686400&v=beta&t=DGM3qsCqrltG1g8m5Cy1kpaw-0U3j8jB6hUsYDxKQWs"
+																	alt="Yusha"
+																	className="w-full h-full object-cover"
+																/>
+															</div>
+														</div>
+													</motion.div>
+
+													{/* Bottom member */}
+													<motion.div 
+														className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2"
+														animate={{ rotate: -360 }}
+														transition={{ 
+															duration: 30,
+															repeat: Infinity,
+															ease: "linear"
+														}}
+													>
+														<div className="flex flex-col items-center space-y-3">
+															<div className="h-32 w-32 rounded-full bg-purple-500/10 border-2 border-purple-500/20 overflow-hidden backdrop-blur-sm">
+																<img 
+																	src="https://i.postimg.cc/05KbJhwD/Whats-App-Image-2025-04-11-at-15-33-54-b6f606de.jpg"
+																	alt="Ayan"
+																	className="w-full h-full object-cover"
+																/>
+															</div>
+														</div>
+													</motion.div>
+
+													{/* Left member */}
+													<motion.div 
+														className="absolute top-1/2 left-0 -translate-x-1/2 -translate-y-1/2"
+														animate={{ rotate: -360 }}
+														transition={{ 
+															duration: 30,
+															repeat: Infinity,
+															ease: "linear"
+														}}
+													>
+														<div className="flex flex-col items-center space-y-3">
+															<div className="h-32 w-32 rounded-full bg-purple-500/10 border-2 border-purple-500/20 overflow-hidden backdrop-blur-sm">
+																<img 
+																	src="https://media.licdn.com/dms/image/v2/D5603AQFDaxP6s-6CaQ/profile-displayphoto-shrink_400_400/profile-displayphoto-shrink_400_400/0/1702226478191?e=1749686400&v=beta&t=Tlc9clA-jDzBOHcEDqHWz_TDeNSJXtdEu2qSeFjGtfk"
+																	alt="Suhas"
+																	className="w-full h-full object-cover"
+																/>
+															</div>
+														</div>
+													</motion.div>
+												</motion.div>
 											</div>
-										)}
+										</div>
 									</motion.div>
-								</motion.div>
-
-								<motion.div
-									animate={{ y: [0, 10, 0] }}
-									transition={{ duration: 2, repeat: Infinity }}
-									className="absolute bottom-12 items-center justify-center -translate-x-1/2"
-								>
-									<ArrowDownIcon className="h-8 w-8 text-purple-500 animate-pulse" />
-								</motion.div>
-							</section>
-							{/* Features Section */}
-							<section id="features" className="relative py-32 px-4 z-10">
-								<div className="max-w-6xl mx-auto">
-									<motion.div
-										initial={{ opacity: 0 }}
-										whileInView={{ opacity: 1 }}
-										transition={{ duration: 1 }}
-										className="grid md:grid-cols-3 gap-8"
-									>
-										<FeatureCard
-											icon={<SparklesIcon className="h-12 w-12 text-purple-500" />}
-											title="ACADEMIC PASSPORT"
-											description={
-												<DecryptedText
-													text="A secure digital wallet for students to store and manage their academic credentials with complete control and portability."
-													animateOn="view"
-													revealDirection="center"
-													className="text-gray-400"
-													encryptedClassName="text-gray-600"
-													speed={30}
-													maxIterations={8}
-												/>
-											}
-										/>
-										<FeatureCard
-											icon={<ShieldCheckIcon className="h-12 w-12 text-purple-500" />}
-											title="TAMPER-PROOF SECURITY"
-											description={
-												<DecryptedText
-													text="Blockchain-powered verification with cryptographic signatures ensuring 100% credential authenticity and integrity."
-													animateOn="view"
-													revealDirection="center"
-													className="text-gray-400"
-													encryptedClassName="text-gray-600"
-													speed={30}
-													maxIterations={8}
-												/>
-											}
-										/>
-										<FeatureCard
-											icon={<RocketLaunchIcon className="h-12 w-12 text-purple-500" />}
-											title="INSTANT VERIFICATION"
-											description={
-												<DecryptedText
-													text="Reduce verification time by 89% with our 24/7 automated credential verification system."
-													animateOn="view"
-													revealDirection="center"
-													className="text-gray-400"
-													encryptedClassName="text-gray-600"
-													speed={30}
-													maxIterations={8}
-												/>
-											}
-										/>
-									</motion.div>
-								</div>
-							</section>
-							{/* About Section */}
-							<section id="about" className="relative py-32 px-4 overflow-hidden z-10">
-								<motion.div 
-									initial={{ opacity: 0, y: 40 }}
-									whileInView={{ opacity: 1, y: 0 }}
-									transition={{ duration: 0.8 }}
-									className="max-w-4xl mx-auto text-center"
-								>
-									<h2 className="text-3xl md:text-4xl font-light mb-6 tracking-tight">About EduChain</h2>
-									<p className="text-gray-400 mb-12 max-w-3xl mx-auto leading-relaxed">
-										EduChain is a revolutionary blockchain-based academic credential verification system that transforms how educational institutions issue, manage, and verify academic credentials. Our platform reduces verification time by 89% and administrative costs by 82%, while ensuring tamper-proof security through advanced blockchain technology.
-									</p>
-									<div className="grid md:grid-cols-3 gap-8 text-left">
-										<div className="p-6 bg-purple-500/5 border border-purple-500/20 rounded-lg">
-											<h3 className="text-purple-500 font-light mb-3">Publisher Tool</h3>
-											<p className="text-gray-400 text-sm">Enables institutions to issue secure digital credentials with cryptographic signatures.</p>
-										</div>
-										<div className="p-6 bg-purple-500/5 border border-purple-500/20 rounded-lg">
-											<h3 className="text-purple-500 font-light mb-3">Academic Passport</h3>
-											<p className="text-gray-400 text-sm">Students' digital wallet for managing and sharing their verified credentials.</p>
-										</div>
-										<div className="p-6 bg-purple-500/5 border border-purple-500/20 rounded-lg">
-											<h3 className="text-purple-500 font-light mb-3">Verification Portal</h3>
-											<p className="text-gray-400 text-sm">24/7 instant verification platform for employers and institutions.</p>
-										</div>
-									</div>
-								</motion.div>
-							</section>
-
-							{/* Team Section */}
-							<section id="partners" className="relative py-32 px-4 overflow-hidden z-10">
-								<motion.div 
-									initial={{ opacity: 0, y: 40 }}
-									whileInView={{ opacity: 1, y: 0 }}
-									transition={{ duration: 0.8 }}
-									className="max-w-6xl mx-auto text-center"
-								>
-									<h2 className="text-3xl md:text-4xl font-light mb-6 tracking-tight">Meet Our Team</h2>
-									<p className="text-gray-400 mb-12 max-w-2xl mx-auto">
-										The innovative minds behind EduChain's blockchain revolution
-									</p>
-									<div className="relative w-full h-[600px] flex items-center justify-center">
-										{/* Orb container with relative positioning for team members */}
-										<div className="relative w-[500px] h-[500px] group">
-											{/* The Orb */}
-											<div className="absolute inset-0 z-0 pointer-events-auto">
-												<Orb
-													hoverIntensity={0.8}
-													rotateOnHover={true}
-													hue={240}
-													forceHoverState={false}
-												/>
-											</div>
-
-											{/* Rotating container for team members */}
-											<motion.div 
-												className="absolute inset-0 z-10 pointer-events-none"
-												animate={{ rotate: 360 }}
-												transition={{ 
-													duration: 30,
-													repeat: Infinity,
-													ease: "linear"
-												}}
-											>
-												{/* Top member */}
-												<motion.div 
-													className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2"
-													animate={{ rotate: -360 }}
-													transition={{ 
-														duration: 30,
-														repeat: Infinity,
-														ease: "linear"
-													}}
-												>
-													<div className="flex flex-col items-center space-y-3">
-														<div className="h-32 w-32 rounded-full bg-purple-500/10 border-2 border-purple-500/20 overflow-hidden backdrop-blur-sm">
-															<img 
-																src="https://media.licdn.com/dms/image/v2/D4D03AQH-jGdrNyBaOQ/profile-displayphoto-shrink_400_400/B4DZOPaWyNHMAk-/0/1733277884553?e=1749686400&v=beta&t=KLkNnNTGhcuibyjup2oKiCqKSXaq9Wmdg8xC14t9oVw"
-																alt="Likith"
-																className="w-full h-full object-cover"
-															/>
-														</div>
-													</div>
-												</motion.div>
-
-												{/* Right member */}
-												<motion.div 
-													className="absolute top-1/2 right-0 translate-x-1/2 -translate-y-1/2"
-													animate={{ rotate: -360 }}
-													transition={{ 
-														duration: 30,
-														repeat: Infinity,
-														ease: "linear"
-													}}
-												>
-													<div className="flex flex-col items-center space-y-3">
-														<div className="h-32 w-32 rounded-full bg-purple-500/10 border-2 border-purple-500/20 overflow-hidden backdrop-blur-sm">
-															<img 
-																src="https://media.licdn.com/dms/image/v2/D5603AQHTzBVD38cS_w/profile-displayphoto-shrink_400_400/B56ZOSO4GeGsAk-/0/1733325194494?e=1749686400&v=beta&t=DGM3qsCqrltG1g8m5Cy1kpaw-0U3j8jB6hUsYDxKQWs"
-																alt="Yusha"
-																className="w-full h-full object-cover"
-															/>
-														</div>
-													</div>
-												</motion.div>
-
-												{/* Bottom member */}
-												<motion.div 
-													className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2"
-													animate={{ rotate: -360 }}
-													transition={{ 
-														duration: 30,
-														repeat: Infinity,
-														ease: "linear"
-													}}
-												>
-													<div className="flex flex-col items-center space-y-3">
-														<div className="h-32 w-32 rounded-full bg-purple-500/10 border-2 border-purple-500/20 overflow-hidden backdrop-blur-sm">
-															<img 
-																src="https://i.postimg.cc/05KbJhwD/Whats-App-Image-2025-04-11-at-15-33-54-b6f606de.jpg"
-																alt="Ayan"
-																className="w-full h-full object-cover"
-															/>
-														</div>
-													</div>
-												</motion.div>
-
-												{/* Left member */}
-												<motion.div 
-													className="absolute top-1/2 left-0 -translate-x-1/2 -translate-y-1/2"
-													animate={{ rotate: -360 }}
-													transition={{ 
-														duration: 30,
-														repeat: Infinity,
-														ease: "linear"
-													}}
-												>
-													<div className="flex flex-col items-center space-y-3">
-														<div className="h-32 w-32 rounded-full bg-purple-500/10 border-2 border-purple-500/20 overflow-hidden backdrop-blur-sm">
-															<img 
-																src="https://media.licdn.com/dms/image/v2/D5603AQFDaxP6s-6CaQ/profile-displayphoto-shrink_400_400/profile-displayphoto-shrink_400_400/0/1702226478191?e=1749686400&v=beta&t=Tlc9clA-jDzBOHcEDqHWz_TDeNSJXtdEu2qSeFjGtfk"
-																alt="Suhas"
-																className="w-full h-full object-cover"
-															/>
-														</div>
-													</div>
-												</motion.div>
-											</motion.div>
-										</div>
-									</div>
-								</motion.div>
-							</section>
-						</>
-					} />
-					<Route path="/admin-dashboard" element={
-						<div className="relative z-10 min-h-screen flex items-center justify-center">
-							<AdminDashboard />
-						</div>
-					} />
-					<Route path="/institution-dashboard" element={
-						<div className="relative z-10 min-h-screen flex items-center justify-center">
-							<InstitutionDashboard />
-						</div>
-					} />
-					<Route path="/student-dashboard" element={
-						<div className="relative z-10 min-h-screen flex items-center justify-center">
-							<StudentDashboard />
-						</div>
-					} />
-					<Route path="/verify-transaction" element={<TransactionVerifier />} />
-				</Routes>
+								</section>
+							</>
+						} />
+						<Route path="/admin-dashboard" element={
+							<div className="relative z-10 min-h-screen flex items-center justify-center">
+								<AdminDashboard />
+							</div>
+						} />
+						<Route path="/institution-dashboard" element={
+							<div className="relative z-10 min-h-screen flex items-center justify-center">
+								<InstitutionDashboard />
+							</div>
+						} />
+						<Route path="/student-dashboard" element={
+							<div className="relative z-10 min-h-screen flex items-center justify-center">
+								<StudentDashboard />
+							</div>
+						} />
+						<Route path="/verify-transaction" element={<TransactionVerifier />} />
+						<Route path="/verify" element={<VerifyCredential />} />
+						<Route path="/verifier-dashboard" element={
+							<div className="relative z-20 min-h-screen flex items-center justify-center">
+								<VerifierDashboard />
+							</div>
+						} />
+					</Routes>
+				</div>
 			</div>
 		</>
 	);

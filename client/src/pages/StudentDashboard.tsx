@@ -3,7 +3,7 @@ import { UserIcon, DocumentTextIcon, ShareIcon, IdentificationIcon, ArrowLeftIco
 import { useActiveAccount } from "thirdweb/react";
 import { useEffect, useState } from "react";
 import { getIpfsHashesForAddress, retrieveTransactionData, isPinataConfigured } from "../services/ipfsService";
-import { Credential, getStudentCredentials } from "../services/credentialService";
+import { Credential, getStudentCredentials, mockGetCredentials } from "../services/credentialService";
 import ViewCredentials from "../components/ViewCredentials";
 import ShareCredentials from "../components/ShareCredentials";
 import VerificationHistory from "../components/VerificationHistory";
@@ -29,7 +29,7 @@ export default function StudentDashboard() {
     verifierName: string;
     verifierAddress: string;
     timestamp: number;
-    status: 'valid' | 'invalid' | 'pending';
+    status: 'valid' | 'invalid';
   }[]>([]);
 
   useEffect(() => {
@@ -120,18 +120,24 @@ export default function StudentDashboard() {
       
       console.log(`Loading credentials for wallet: ${walletAddress}`);
       
-      // Get all credentials for this student
-      const studentCredentials = getStudentCredentials(walletAddress);
+      // Use mockGetCredentials to fetch mock data
+      const studentCredentials = mockGetCredentials();
       
       // Filter to only include credentials where studentWallet matches the current wallet
       const filteredCredentials = studentCredentials.filter(
-        cred => cred.studentWallet.toLowerCase() === walletAddress.toLowerCase()
+        (cred: Credential) => cred.studentWallet.toLowerCase() === walletAddress.toLowerCase()
       );
       
       console.log(`Found ${filteredCredentials.length} credentials for this wallet`);
-      setCredentials(filteredCredentials);
+      
+      // Sort credentials by issue date (newest first)
+      const sortedCredentials = filteredCredentials.sort((a: Credential, b: Credential) => b.issueDate - a.issueDate);
+      
+      setCredentials(sortedCredentials);
     } catch (error) {
       console.error("Error loading credentials:", error);
+      // Show error message to user
+      alert("Error loading credentials. Please try refreshing the page.");
     }
   };
 
@@ -159,7 +165,7 @@ export default function StudentDashboard() {
     credentialTitle: string,
     verifierName: string,
     verifierAddress: string,
-    status: 'valid' | 'invalid' | 'pending' = 'valid'
+    status: 'valid' | 'invalid' = 'valid'
   ) => {
     if (!account?.address) return;
     
@@ -193,7 +199,7 @@ export default function StudentDashboard() {
       credential.title,
       verifierName,
       verifierAddress,
-      'pending'
+      'valid'
     );
     
     // Return a "share link" that could be used in a real app
@@ -378,11 +384,8 @@ export default function StudentDashboard() {
                   </div>
                   <div className="text-xs text-gray-400 flex justify-between">
                     <span>{new Date(record.timestamp).toLocaleDateString()}</span>
-                    <span className={`${
-                      record.status === 'valid' ? 'text-green-400' : 
-                      record.status === 'pending' ? 'text-yellow-400' : 'text-red-400'
-                    }`}>
-                      {record.status.charAt(0).toUpperCase() + record.status.slice(1)}
+                    <span className="text-green-400">
+                      Valid
                     </span>
                   </div>
                 </li>
