@@ -8,7 +8,6 @@ import Aurora from "./components/Aurora";
 import Squares from "./components/Squares";
 import Orb from "./components/Orb";
 import DecryptedText from "./components/DecryptedText";
-import GradientText from "./components/GradientText";
 import RoleSelectionModal from "./components/RoleSelectionModal";
 import InstitutionDashboard from "./pages/InstitutionDashboard";
 import StudentDashboard from "./pages/StudentDashboard";
@@ -18,16 +17,6 @@ import VerifyCredential from './components/VerifyCredential';
 import VerifierDashboard from './components/VerifierDashboard';
 import { UserRole } from './types';
 
-// Define the PendingUser interface to match what's used in AdminDashboard.tsx
-interface PendingUser {
-	address: string;
-	role: UserRole;
-	timestamp: number;
-	paymentConfirmed?: boolean;
-	transactionHash?: string;
-	ipfsHash?: string;
-	status?: string;
-}
 
 function AppContent() {
 	const [showAurora, setShowAurora] = useState(true);
